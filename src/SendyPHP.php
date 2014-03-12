@@ -3,60 +3,162 @@
 namespace SendyPHP;
 
 /**
- * Sendy Class
+ * Sendy
+ *
+ * This Sendy PHP Class connects to the Sendy API that sends mails using Amazon SES.
+ *
+ * @author Jacob Bennett <me@jakebennett.net>
+ * @author Jeroen Desloovere <info@jeroendesloovere.be>
  */
 class SendyPHP
 {
-    protected $installation_url;
-    protected $api_key;
-    protected $list_id;
-    
-    public function __construct(array $config)
-    {
-        //error checking
-        $list_id = @$config['list_id'];
-        $installation_url = @$config['installation_url'];
-        $api_key = @$config['api_key'];
-        
-        if (!isset($list_id)) {
-            throw new Exception("Required config parameter [list_id] is not set", 1);
-        }
-        
-        if (!isset($installation_url)) {
-            throw new Exception("Required config parameter [installation_url] is not set", 1);
-        }
-        
-        if (!isset($api_key)) {
-            throw new Exception("Required config parameter [api_key] is not set", 1);
-        }
+	/**
+	 * API key
+	 *
+	 * @param string
+	 */
+    protected $apiKey;
 
-        $this->list_id = $list_id;
-        $this->installation_url = $installation_url;
-        $this->api_key = $api_key;
-    }
+	/**
+	 * API url
+	 *
+	 * @param string
+	 */
+	protected $apiUrl;
 
-    public function setListId($list_id)
-    {
-        if (!isset($list_id)) {
-            throw new Exception("Required config parameter [list_id] is not set", 1);
-        }
-        
-        $this->list_id = $list_id;
-    }
+	/**
+	 * List ID
+	 *
+	 * @param string
+	 */
+	protected $listId;
 
+	/**
+	 * Construct
+	 *
+	 * @return void
+	 * @param string $apiKey
+	 * @param string $apiUrl
+	 * @param string $listId
+	 */
+	public function __construct($apiKey, $apiUrl, $listId)
+	{
+	    // we define our parameters	
+		$this->apiKey = (string) $apiKey;
+		$this->apiUrl = (string) $apiUrl;
+		$this->listId = (string) $listId;
+	}
+
+	/**
+	 * Do call
+	 *
+	 * @param string $method
+	 * @param array $parameters
+	 * @return array
+	 */
+	protected function doCall($method, $parameters)
+	{
+		// init url
+		$url = $this->apiUrl . 'api/' . $method . '.php';
+
+		// define api key
+		$parameters['api_key'] = $this->apiKey;
+
+		// define list id if not already set
+		if(!isset($parameters['list_id'])) $parameters['list_id'] = $this->listId;
+
+		// open curl connection
+		$ch = curl_init();
+
+		// define curl settings
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+		curl_setopt($ch, CURLOPT_URL, $url);
+		curl_setopt($ch, CURLOPT_POST, 1);
+		curl_setopt($ch, CURLOPT_POSTFIELDS, $parameters);
+
+		// get results
+		$result = curl_exec($ch);
+
+		// close curl connection
+		curl_close($ch);
+
+        // return result
+		return $result;
+	}
+
+    /**
+     * Get list id
+     *
+     * @return string
+     */
     public function getListId()
     {
-        return $this->list_id;
+        return $this->$listId;
     }
 
+    /**
+     * Get subscribers count
+     *
+     * @return int
+     * @param string $listId
+     */
+    public function getSubscribersCount($listId = null)
+    {
+        // init parameters
+	    $parameters = array();
+
+	    // listId is set
+	    if (isset($listId)) {
+	        // add to parameters
+	        $parameters[] = $listId;
+	    }
+
+		// return int
+		return $this->doCall(
+		    'subscribers/active-subscriber-count',
+		    $parameters
+		)
+    }
+
+	/**
+	 * Has this list subscribers?
+	 *
+	 * @return bool
+	 * @return string listId
+	 */
+	public function hasSubscribers($listId = null)
+	{
+	    // return bool
+		return is_numeric($this->getSubscribersCount($listId));
+	}
+
+    /**
+     * Set list id
+     *
+     * @return void
+     * @param string
+     */
+    public function setListId($listId)
+    {
+        // define list id
+        $this->$listId = (string) $listId;
+    }
+
+    /**
+     * Subscribe a user
+     *
+     * @return array
+     * @param array $values
+     */
     public function subscribe(array $values)
     {
-        $type = 'subscribe';
+        // do subscribe call
+        $result = strval($this->doCall(
+            'subscribe',
+            $values
+        ));
 
-        //Send the subscribe
-        $result = strval($this->buildAndSend($type, $values));
-
-        //Handle results
+        // handle results
         switch ($result) {
             case '1':
                 return array(
@@ -79,19 +181,25 @@ class SendyPHP
                     );
                 break;
         }
-
-
-
     }
 
+    /**
+     * Unsubscribe
+     *
+     * @return array
+     * @param string $email
+     */
     public function unsubscribe($email)
     {
-        $type = 'unsubscribe';
-        
-        //Send the unsubscribe
-        $result = strval($this->buildAndSend($type, array('email' => $email)));
+        // do unsubscribe call
+        $result = strval($this->doCall(
+            'unsubscribe',
+            array(
+                'email' => $email
+            )
+        );
 
-        //Handle results
+        // handle results
         switch ($result) {
             case '1':
                 return array(
@@ -107,21 +215,24 @@ class SendyPHP
                     );
                 break;
         }
-
     }
 
+    /**
+     * Sub status
+     *
+     * @param string $email
+     */
     public function substatus($email)
     {
-        $type = 'api/subscribers/subscription-status.php';
-        
-        //Send the request for status
-        $result = $this->buildAndSend($type, array(
-            'email' => $email,
-            'api_key' => $this->api_key,
-            'list_id' => $this->list_id
-        ));
+        // do call for the subscribers status
+        $result = $this->doCall(
+            'subscribers/subscription-status',
+            array(
+                'email' => $email
+            )
+        );
 
-        //Handle the results
+        // handle the results
         switch ($result) {
             case 'Subscribed':
             case 'Unsubscribed':
@@ -145,24 +256,27 @@ class SendyPHP
 
     }
 
+    /**
+     * Su
+     */
     public function subcount($list = "")
     {
-        $type = 'api/subscribers/active-subscriber-count.php';
+        $method = 'api/subscribers/active-subscriber-count.php';
 
         //handle exceptions
-        if ($list== "" && $this->list_id == "") {
-            throw new Exception("method [subcount] requires parameter [list] or [$this->list_id] to be set.", 1);
+        if ($list== "" && $this->$listId == "") {
+            throw new SendyException("method [subcount] requires parameter [list] or [$this->$listId] to be set.", 1);
         }
 
-        //if a list is passed in use it, otherwise use $this->list_id
+        //if a list is passed in use it, otherwise use $this->$listId
         if ($list == "") {
-            $list = $this->list_id;
+            $list = $this->$listId;
         }
 
         //Send request for subcount
-        $result = $this->buildAndSend($type, array(
+        $result = $this->doCall($method, array(
             'api_key' => $this->api_key,
-            'list_id' => $list
+            '$listId' => $list
         ));
         
         //Handle the results
@@ -178,42 +292,13 @@ class SendyPHP
             'status' => false,
             'message' => $result
         );
-
-    }
-
-    private function buildAndSend($type, array $values)
-    {
-
-        //error checking
-        if (!isset($type)) {
-            throw new Exception("Required config parameter [type] is not set", 1);
-        }
-        
-        if (!isset($values)) {
-            throw new Exception("Required config parameter [values] is not set", 1);
-        }
-
-        //Global options for return
-        $return_options = array(
-            'list' => $this->list_id,
-            'boolean' => 'true'
-        );
-
-        //Merge the passed in values with the options for return
-        $content = array_merge($values, $return_options);
-
-        //build a query using the $content
-        $postdata = http_build_query($content);
-
-        $ch = curl_init($this->installation_url .'/'. $type);
-        curl_setopt($ch, CURLOPT_HEADER, 0);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
-        curl_setopt($ch, CURLOPT_POST, 1);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $postdata);
-        $result = curl_exec($ch);
-        curl_close($ch);
-
-        return $result;
     }
 }
+
+
+/**
+ * Sendy Exception
+ *
+ * @author Jeroen Desloovere <info@jeroendesloovere.be>
+ */
+class SendyException extends Exception {}
